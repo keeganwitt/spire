@@ -42,7 +42,7 @@ The following metrics are emitted:
 | Call Counter | `datastore`, `registration_entry`, `fetch` | | The Datastore is fetching registration entries.
 | Call Counter | `datastore`, `registration_entry`, `list` | | The Datastore is listing registration entries.
 | Call Counter | `datastore`, `registration_entry`, `prune` | | The Datastore is pruning registration entries.
-| Call Counter | `datastore`, `registration_entry`, `update` | | The Datastore is updating a registration entry. 
+| Call Counter | `datastore`, `registration_entry`, `update` | | The Datastore is updating a registration entry.
 | Call Counter | `entry`, `cache`, `reload` | | The Server is reloading its in-memory entry cache from the datastore.
 | Counter | `manager`, `jwt_key`, `activate` | | The CA manager has successfully activated a JWT Key.
 | Gauge | `manager`, `x509_ca`, `rotate`, `ttl` | `trust_domain_id` | The CA manager is rotating the X.509 CA with a given TTL for a specific Trust Domain.
@@ -72,7 +72,7 @@ The following metrics are emitted:
 | Gauge | `sds_api`, `connections` | | The number of active connection that the SDS API has.
 | Counter | `workload_api`, `bundles_update`, `jwt` | | The Workload API has successfully updated a JWT bundle.
 | Counter | `workload_api`, `connection` | | The Workload API has successfully established a new connection.
-| Gauge | `workload_api`, `connections` | | The number of active connections that the Workload API has. 
+| Gauge | `workload_api`, `connections` | | The number of active connections that the Workload API has.
 | Sample | `workload_api`, `discovered_selectors` | | The number of selectors discovered during a workload attestation process.
 | Call Counter | `workload_api`, `workload_attestation` | | The Workload API is performing a workload attestation.
 | Call Counter | `workload_api`, `workload_attestor` | `attestor` | The Workload API is invoking a given attestor.

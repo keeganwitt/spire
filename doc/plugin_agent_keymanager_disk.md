@@ -11,9 +11,9 @@ for long enough for its certificate to expire, attestation will need to be re-pe
 A sample configuration:
 
 ```
-	KeyManager "disk" {
-		plugin_data {
-			directory = "/opt/spire/data/agent"
-		}
-	}
+ KeyManager "disk" {
+  plugin_data {
+   directory = "/opt/spire/data/agent"
+  }
+ }
 ```

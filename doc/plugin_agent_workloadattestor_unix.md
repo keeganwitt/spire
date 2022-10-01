@@ -51,10 +51,10 @@ Defenses against this are:
 A sample configuration:
 
 ```
-	WorkloadAttestor "unix" {
-		plugin_data {
-		}
-	}
+ WorkloadAttestor "unix" {
+  plugin_data {
+  }
+ }
 ```
 
 ### Platform support

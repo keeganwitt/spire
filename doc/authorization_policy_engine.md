@@ -1,13 +1,13 @@
 # Authorization policy engine
 
 **Warning**: Use of custom authorization policies is experiemental and can
-result in security degredation if not configured correctly. Please refer to 
+result in security degredation if not configured correctly. Please refer to
 [this section](#extending-the-policy) for more details on extending the default
 policy.
 
 The authorization decisions in SPIRE are determined by a policy engine which
 bases its decision on a rego policy and databindings with Open Policy Agent
-(OPA). 
+(OPA).
 
 This is a sample configuration of the policy.
 
@@ -31,7 +31,7 @@ authorization policy](#default-configurations).
 
 The policy engine is based on the [Open Policy Agent
 (OPA)](https://www.openpolicyagent.org/). This is configured via two
-components, the rego policy, and the policy data path (or databindings as 
+components, the rego policy, and the policy data path (or databindings as
 referred to in OPA).
 
 - The rego policy is a rego policy file defining how to authorize the API calls.
@@ -48,6 +48,7 @@ databindings file.
 The rego policy defines how input to the policy engine is evaluated to produce the result used by SPIRE server for authorization decisions.
 
 This is defined by the result object:
+
 ```
 result = {
   "allow": true/false,
@@ -59,12 +60,13 @@ result = {
 ```
 
 The fields of the result are the following:
+
 - `allow`: a boolean that if true, will authorize the call
 - `allow_if_local`: a boolean that if true, will authorize the call only if the
   caller is a local UNIX socket call
 - `allow_if_admin`: a boolean that if true, will authorize the call only if the
   caller is a SPIFFE ID with the Admin flag set
-- `allow_if_downstream`: a boolean that if true, will authorize the call 
+- `allow_if_downstream`: a boolean that if true, will authorize the call
   only if the caller is a SPIFFE ID that is downstream
 - `allow_if_agent`: a boolean that is true, will authorize the call only if the
   caller is an agent.
@@ -79,6 +81,7 @@ admit_request =
 ```
 
 The inputs that are passed into the policy are:
+
 - `input`: the input from the SPIRE server for the authorization call
 - `data`: the databinding from the policy data file
 
@@ -114,9 +117,10 @@ example, a JSON data object may look like this:
 }
 ```
 
-With the example data object above, we could construct a policy in rego to 
-check that if the input's full method is equal to one of the objects defined in 
+With the example data object above, we could construct a policy in rego to
+check that if the input's full method is equal to one of the objects defined in
 the `apis` fields' `full_method` sub-field, then `allow` should be set to true.
+
 ```
 allow = true {
     input.full_method == data.apis[_].full_method
@@ -127,7 +131,6 @@ allow = true {
 
 Here are the default rego policy and policy data values. These are
 what is required to carry out the default SPIRE authorization decisions.
-
 
 #### Default policy.rego
 
@@ -159,16 +162,15 @@ This section contains examples of how the authorization policy can be extended.
 
 ## OPA Warning
 
-It is important when implementing custom policies that one understands the 
+It is important when implementing custom policies that one understands the
 evaluation semantics and details of OPA rego. An example of subtleties of OPA
-rego policy is the evaluation of a variable is taken as a logical OR of all 
-the clauses. Therefore, creating an additional rule that sets  `allow = false` 
+rego policy is the evaluation of a variable is taken as a logical OR of all
+the clauses. Therefore, creating an additional rule that sets  `allow = false`
 will not be an effective addition to the policy.
 
-It is recommended to familiarize yourself with the 
+It is recommended to familiarize yourself with the
 [OPA rego language](https://www.openpolicyagent.org/docs/latest/) before
 implementing custom policies.
-
 
 ## Example 1a: Entry creation namespacing restrictions
 
@@ -177,7 +179,7 @@ can create namespaces within the trust domain to determine the type of entries
 that can be created by each client. This would be a scenario of having two
 departments where one would not be able to create entries for the other.
 
-Note that this example is specifically for calls through the TCP endpoint, where 
+Note that this example is specifically for calls through the TCP endpoint, where
 the user corresponds to the SPIFFE ID in the x509 certificate presented during
 invocation of the API.
 
@@ -200,6 +202,7 @@ This can be defined by creating some additional objects in the data binding:
 
 The rego policy can then be updated to compare against the dataset of namespaces
 of users and path prefixes to compare against the entry create input request.
+
 ```
 check_entry_create_namespace {
     input.full_method == "/spire.api.server.entry.v1.Entry/BatchCreateEntry"
@@ -229,10 +232,11 @@ allow = true {
 Building on top of the previous example, let's say we want to have sub
 departments, having schedulers for a subset of paths within the trust domain.
 This can be done by building on top of the previous example, with the addition
-of an exclusion list. 
+of an exclusion list.
 
 In this example, we have two schedulers:
-- `schedulers/finance` is able to create paths starting with  `/finance` 
+
+- `schedulers/finance` is able to create paths starting with  `/finance`
 - `schedulers/finance/EMEA` is able to create paths starting with `/finance/EMEA`
 - `schedulers/finance` should not be able to create paths starting with
   `/finance/EMEA`
@@ -259,6 +263,7 @@ list. We will use the following policy data:
 ```
 
 We can then add a couple lines to check for the exclusion list:
+
 ```
 check_entry_create_namespace {
     input.full_method == "/spire.api.server.entry.v1.Entry/BatchCreateEntry"
@@ -305,6 +310,7 @@ flag.
 The rego policy can then be updated to check for this, an example of an allow
 clause would look like the following. Note that it is important to check to see
 how this fits in with the other parts of the rego policy.
+
 ```
 # Any allow check
 allow = true {
@@ -315,7 +321,7 @@ allow = true {
 ## Example 3a: Restrict calls from local UNIX socket
 
 In this example, we want to restrict deletion of entries. For the first part of
-this example, we will fully lock down the ability to delete entries. 
+this example, we will fully lock down the ability to delete entries.
 
 This can be easily done by leveraging the set of default rules. In the default
 policy data file, there are general allow restrictions for APIs. For example,
@@ -354,7 +360,6 @@ entries:
     ]
 }
 ```
-
 
 We can then define the following rego policy to check the calls to the entry
 delete endpoint, and add checks that the caller SPIFFE ID is in the list of

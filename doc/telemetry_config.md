@@ -1,6 +1,7 @@
 ## Telemetry configuration
 
 If telemetry is desired, it may be configured by using a dedicated `telemetry { ... }` section. The following metrics collectors are currently supported:
+
 - Prometheus
 - Statsd
 - DogStatsd
@@ -35,22 +36,26 @@ You may use all, some, or none of the collectors. The following collectors suppo
 | `port`           | `int`         | Prometheus server port |
 
 #### `DogStatsd`
+
 | Configuration    | Type          | Description |
 | ---------------- | ------------- | ----------- |
 | `address`        | `string`      | DogStatsd address |
 
 #### `Statsd`
+
 | Configuration    | Type          | Description |
 | ---------------- | ------------- | ----------- |
 | `address`        | `string`      | Statsd address |
 
 #### `M3`
+
 | Configuration    | Type          | Description |
 | ---------------- | ------------- | ----------- |
 | `address`        | `string`      | M3 address |
 | `env`            | `string`      | M3 environment, e.g. `production`, `staging` |
 
 #### `In-Mem`
+
 | Configuration    | Type          | Description | Default |
 | ---------------- | ------------- | ----------- | ------- |
 | `enabled`        | `bool`        | Enable this collector | `true` |

@@ -1,6 +1,6 @@
 # Agent plugin: SVIDStore "aws_secretsmanager"
 
-The `aws_secretsmanager` plugin stores in [AWS Secrets Manager](https://aws.amazon.com/es/secrets-manager/) the resulting X509-SVIDs of the entries that the agent is entitled to. 
+The `aws_secretsmanager` plugin stores in [AWS Secrets Manager](https://aws.amazon.com/es/secrets-manager/) the resulting X509-SVIDs of the entries that the agent is entitled to.
 
 ### Secret format
 
@@ -8,13 +8,13 @@ The format that is used to store in a secret the issued identity is the followin
 
 ```
 {
-	"spiffeId": "spiffe://example.org",
-	"x509Svid": "X509_CERT_CHAIN_PEM",
-	"x509SvidKey": "PRIVATE_KET_PEM",
-	"bundle": "X509_BUNDLE_PEM",
-	"federatedBundles": {
-		"spiffe://federated.org": "X509_FEDERATED_BUNDLE_PEM"
-	}
+ "spiffeId": "spiffe://example.org",
+ "x509Svid": "X509_CERT_CHAIN_PEM",
+ "x509SvidKey": "PRIVATE_KET_PEM",
+ "bundle": "X509_BUNDLE_PEM",
+ "federatedBundles": {
+  "spiffe://federated.org": "X509_FEDERATED_BUNDLE_PEM"
+ }
 }
 ```
 
@@ -65,4 +65,3 @@ The selectors of the type `aws_secretsmanager` are used to describe metadata tha
 | `aws_secretsmanager:secretname` | `aws_secretsmanager:secretname:some-name` | Friendly name of the secret where the SVID is stored. If not specified `aws_secretsmanager:arn` must be defined |
 | `aws_secretsmanager:arn`        | `aws_secretsmanager:arn:some-arn`         | The Amazon Resource Name (ARN) of the secret where the SVID is stored. If not specified, `aws_secretsmanager:secretname` must be defined |
 | `aws_secretsmanager:kmskeyid`    | `aws_secretmanager:kmskeyid`              | Specifies the ARN, Key ID, or alias of the AWS KMS customer master key (CMK) to be used to encrypt the secrets. Any of the supported ways to identify a AWS KMS key ID can be used. If a CMK in a different account needs to be referenced, only the key ARN or the alias ARN can be used. If not specified, the AWS account's default CMK is used |
-

@@ -1,7 +1,7 @@
 # Agent plugin: WorkloadAttestor "docker"
 
 The `docker` plugin generates selectors based on docker labels for workloads calling the agent.
-It does so by retrieving the workload's container ID from its cgroup membership on Unix systems or Job Object names on Windows, 
+It does so by retrieving the workload's container ID from its cgroup membership on Unix systems or Job Object names on Windows,
 then querying the docker daemon for the container's labels.
 
 | Configuration | Description | Default      |
@@ -9,7 +9,7 @@ then querying the docker daemon for the container's labels.
 | docker_socket_path | The location of the docker daemon socket (Unix) | "unix:///var/run/docker.sock" |
 | docker_version | The API version of the docker daemon. If not specified | |
 | container_id_cgroup_matchers | A list of patterns used to discover container IDs from cgroup entries (Unix) |
-| docker_host | The location of the Docker Engine API endpoint (Windows only) | "npipe:////./pipe/docker_engine" | 
+| docker_host | The location of the Docker Engine API endpoint (Windows only) | "npipe:////./pipe/docker_engine" |
 
 A sample configuration:
 
@@ -39,6 +39,7 @@ given patterns MUST NOT be ambiguous and an error will be returned if multiple
 patterns can match the same input.
 
 Valid Example:
+
 ```
     container_id_cgroup_matchers = [
         "/docker/<id>",
@@ -47,6 +48,7 @@ Valid Example:
 ```
 
 Invalid Example:
+
 ```
     container_id_cgroup_matchers = [
         "/a/b/<id>",
@@ -58,8 +60,11 @@ Note: The pattern provided is *not* a regular expression. It is a simplified mat
 language that enforces a forward slash-delimited schema.
 
 ## Example
+
 ### Labels
+
 If a workload container is started with `docker run --label com.example.name=foo [...]`, then workload registration would occur as:
+
 ```
 spire-server entry create \
     -parentID spiffe://example.org/host \
@@ -68,6 +73,7 @@ spire-server entry create \
 ```
 
 You can compose multiple labels as selectors.
+
 ```
 spire-server entry create \
     -parentID spiffe://example.org/host \
@@ -80,6 +86,7 @@ spire-server entry create \
 
 Example of an environment variable selector for the variable `ENVIRONMENT`
 matching a value of `prod`:
+
 ```
 spire-server entry create \
     -parentID spiffe://example.org/host \

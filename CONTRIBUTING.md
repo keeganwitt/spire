@@ -10,16 +10,15 @@ from the SPIFFE project.
 
 For basic development you will need:
 
-* **Go 1.11** or higher (https://golang.org/dl/)
+* **Go 1.11** or higher (<https://golang.org/dl/>)
 
 For development that requires changes to the gRPC interfaces you will need:
 
-* The protobuf compiler (https://github.com/google/protobuf)
-* The protobuf documentation generator (https://github.com/pseudomuto/protoc-gen-doc)
+* The protobuf compiler (<https://github.com/google/protobuf>)
+* The protobuf documentation generator (<https://github.com/pseudomuto/protoc-gen-doc>)
 * protoc-gen-go and protoc-gen-spireplugin (`make utils`)
 
-
-#  Building
+# Building
 
 Since go modules are used, this repository can live in any folder on your local disk (it is not required to be in GOPATH).
 
@@ -46,13 +45,13 @@ both cases you will use the same Makefile commands.
 To build SPIRE within a container, first build the development image:
 
 ```
-$ make dev-image
+make dev-image
 ```
 
 Then launch a shell inside of development container:
 
 ```
-$ make dev-shell
+make dev-shell
 ```
 
 Because the docker container shares the `.build` cache and `$GOPATH/pkg/mod`
@@ -149,15 +148,17 @@ telemetry.FooNotUpdatedCount(notUpdatedCount)
 
 Labels added to metrics must be singular only; that is:
 
-- the value of a metrics label must not be an array or slice, and a label of some name must only be added
+* the value of a metrics label must not be an array or slice, and a label of some name must only be added
 once. Failure to follow this will make metrics less usable for non-tagging metrics libraries such as `statsd`.
 As counter examples, DO NOT do the following:
+
 ```
 []telemetry.Label{
   {Name: "someName", "val1"},
   {Name: "someName", "val2"},
 }
 ```
+
 ```
 var callCounter telemetry.CallCounter
 ...
@@ -166,11 +167,12 @@ callCounter.AddLabel("someName", "val1")
 callCounter.AddLabel("someName", "val2")
 ```
 
-- the existence of a metrics label is constant for all instances of a given metric. For some given metric A with
+* the existence of a metrics label is constant for all instances of a given metric. For some given metric A with
 label X, label X must appear in every instance of metric A rather than conditionally. Failure to follow this will
 make metrics less usable for non-tagging metrics libraries such as `statsd`, and potentially break aggregation for
 tagging metrics libraries.
 As a counter example, DO NOT do the following:
+
 ```
 var callCounter telemetry.CallCounter
 ...
@@ -182,7 +184,9 @@ if x > 5000 {
   callCounter.AddLabel("big_load", "true")
 }
 ```
+
 Instead, the following would be more acceptable:
+
 ```
 var callCounter telemetry.CallCounter
 ...
@@ -231,5 +235,7 @@ before sending a pull request. From the project root:
 ```
 ln -s .githooks/pre-commit .git/hooks/pre-commit
 ```
+
 # Reporting security vulnerabilities
+
 If you've found a vulnerability or a potential vulnerability in SPIRE please let us know at security@spiffe.io. We'll send a confirmation email to acknowledge your report, and we'll send an additional email when we've identified the issue positively or negatively.

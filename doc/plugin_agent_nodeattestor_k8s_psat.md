@@ -20,7 +20,6 @@ The main configuration accepts the following values:
 | `cluster`       | Name of the cluster. It must correspond to a cluster configured in the server plugin. | |
 | `token_path`    | Path to the projected service account token on disk | "/var/run/secrets/tokens/spire-agent" |
 
-
 A sample configuration with the default token path:
 
 ```
@@ -32,6 +31,7 @@ A sample configuration with the default token path:
 ```
 
 Its k8s volume definition:
+
 ```
 volumes:
     - name: spire-agent
@@ -44,6 +44,7 @@ volumes:
 ```
 
 And volume mount:
+
 ```
 volumeMounts:
     - mountPath: /var/run/secrets/tokens
@@ -51,7 +52,6 @@ volumeMounts:
 ```
 
 A full example of this attestor is provided in [the SPIRE examples repository](https://github.com/spiffe/spire-examples/tree/main/examples/k8s/simple_psat).
-
 
 ## Considerations
 

@@ -40,6 +40,7 @@ Defenses against this are:
   be mitigated by using rate limiting in conjunction with non-negative `workload_size_limit`.
 
 #### Notes
+
 - An enabled group in a token is a group that has the [SE_GROUP_ENABLED](https://docs.microsoft.com/en-us/windows/win32/secauthz/sid-attributes-in-an-access-token) attribute.
 
 - User and group account names are expressed using the [down-level logon name format](https://docs.microsoft.com/en-us/windows/win32/secauthn/user-name-formats#down-level-logon-name).
@@ -49,8 +50,8 @@ Defenses against this are:
 This plugin does not require any configuration setting. It can be added in the following way in the agent configuration file:
 
 ```
-	WorkloadAttestor "windows" {
-	}
+ WorkloadAttestor "windows" {
+ }
 ```
 
 ### Platform support

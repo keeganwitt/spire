@@ -23,10 +23,10 @@ spiffe://<trust domain>/spire/agent/x509pop/<fingerprint>
 A sample configuration:
 
 ```
-	NodeAttestor "x509pop" {
-		plugin_data {
-			private_key_path = "/opt/spire/conf/agent/agent.key.pem"
-			certificate_path = "/opt/spire/conf/agent/agent.crt.pem"
-		}
-	}
+ NodeAttestor "x509pop" {
+  plugin_data {
+   private_key_path = "/opt/spire/conf/agent/agent.key.pem"
+   certificate_path = "/opt/spire/conf/agent/agent.crt.pem"
+  }
+ }
 ```

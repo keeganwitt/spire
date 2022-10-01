@@ -10,6 +10,7 @@ resource. Once the referenced issuer has signed the request, the intermediate
 and CA bundle is retrieved by SPIRE.
 
 # Considerations
+
 This plugin requires access to a Kubernetes cluster running cert-manager and
 create CertificateRequests.
 
@@ -25,6 +26,7 @@ flow](https://cert-manager.io/docs/concepts/certificaterequest/#userinfo)
 if running a custom approver.
 
 # Configuration
+
 This plugin requests certificates from the configured
 [cert-manager](https://cert-manager.io/docs/configuration/) issuer.
 
@@ -35,7 +37,6 @@ This plugin requests certificates from the configured
 | issuer_name               | The name of the issuer to reference in CertificateRequests.       |
 | issuer_kind               | (Optional) The kind of the issuer to reference in CertificateRequests. Defaults to "Issuer" if empty. |
 | issuer_group              | (Optional) The group of the issuer to reference in CertificateRequests. Defaults to "cert-manager.io" if empty. |
-
 
 ```hcl
 UpstreamAuthority "cert-manager" {
