@@ -9,12 +9,15 @@ import (
 	"encoding/pem"
 	"errors"
 	"fmt"
+	"maps"
 	"hash/crc32"
 	"os"
 	"strings"
 	"sync"
 	"time"
 	"unicode"
+
+	"golang.org/x/sync/errgroup"
 
 	"cloud.google.com/go/iam"
 	"cloud.google.com/go/iam/apiv1/iampb"
@@ -800,23 +803,50 @@ func (p *Plugin) keepActiveCryptoKeys(ctx context.Context) error {
 	p.log.Debug("Keeping CryptoKeys managed by this server active")
 
 	p.entriesMtx.Lock()
-	defer p.entriesMtx.Unlock()
-	var errs []string
+	entries := make([]*kmspb.CryptoKey, 0, len(p.entries))
 	for _, entry := range p.entries {
-		entry.cryptoKey.Labels[labelNameLastUpdate] = fmt.Sprint(p.hooks.clk.Now().Unix())
-		_, err := p.kmsClient.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{
-			UpdateMask: &fieldmaskpb.FieldMask{
-				Paths: []string{"labels"},
-			},
-			CryptoKey: entry.cryptoKey,
+		// We need to copy the CryptoKey object to avoid a data race since we are
+		// modifying its labels concurrently and it is shared with other parts
+		// of the plugin.
+		entries = append(entries, &kmspb.CryptoKey{
+			Name:            entry.cryptoKey.Name,
+			Labels:          maps.Clone(entry.cryptoKey.Labels),
+			VersionTemplate: entry.cryptoKey.VersionTemplate,
+			Purpose:         entry.cryptoKey.Purpose,
 		})
-		if err != nil {
-			p.log.Error("Failed to update CryptoKey", cryptoKeyNameTag, entry.cryptoKey.Name, reasonTag, err)
-			errs = append(errs, err.Error())
-		}
+	}
+	p.entriesMtx.Unlock()
+
+	g, ctx := errgroup.WithContext(ctx)
+	// Limit concurrency to a reasonable value to avoid overwhelming the API
+	// or exceeding rate limits. 10 is a common choice for these kinds of tasks.
+	g.SetLimit(10)
+
+	var errsMtx sync.Mutex
+	var errs []string
+	for _, cryptoKey := range entries {
+		cryptoKey := cryptoKey
+		g.Go(func() error {
+			cryptoKey.Labels[labelNameLastUpdate] = fmt.Sprint(p.hooks.clk.Now().Unix())
+			_, err := p.kmsClient.UpdateCryptoKey(ctx, &kmspb.UpdateCryptoKeyRequest{
+				UpdateMask: &fieldmaskpb.FieldMask{
+					Paths: []string{"labels"},
+				},
+				CryptoKey: cryptoKey,
+			})
+			if err != nil {
+				p.log.Error("Failed to update CryptoKey", cryptoKeyNameTag, cryptoKey.Name, reasonTag, err)
+				errsMtx.Lock()
+				errs = append(errs, err.Error())
+				errsMtx.Unlock()
+			}
+			return nil
+		})
 	}
 
-	if errs != nil {
+	_ = g.Wait()
+
+	if len(errs) > 0 {
 		return errors.New(strings.Join(errs, "; "))
 	}
 	return nil

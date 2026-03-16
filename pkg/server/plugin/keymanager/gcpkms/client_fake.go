@@ -282,7 +282,14 @@ type fakeKMSClient struct {
 	store                        fakeStore
 	tokeninfo                    *oauth2.Tokeninfo
 	updateCryptoKeyErr           error
+	updateLatency                time.Duration
 	keyIsDisabled                bool
+}
+
+func (k *fakeKMSClient) setUpdateLatency(latency time.Duration) {
+	k.mu.Lock()
+	defer k.mu.Unlock()
+	k.updateLatency = latency
 }
 
 func (k *fakeKMSClient) setAsymmetricSignErr(fakeError error) {
@@ -694,7 +701,18 @@ func (k *fakeKMSClient) ResourceIAM(string) iamHandler {
 	return k.fakeIAMHandle
 }
 
-func (k *fakeKMSClient) UpdateCryptoKey(_ context.Context, req *kmspb.UpdateCryptoKeyRequest, _ ...gax.CallOption) (*kmspb.CryptoKey, error) {
+func (k *fakeKMSClient) UpdateCryptoKey(ctx context.Context, req *kmspb.UpdateCryptoKeyRequest, _ ...gax.CallOption) (*kmspb.CryptoKey, error) {
+	k.mu.RLock()
+	latency := k.updateLatency
+	k.mu.RUnlock()
+	if latency > 0 {
+		select {
+		case <-time.After(latency):
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
+
 	if k.updateCryptoKeyErr != nil {
 		return nil, k.updateCryptoKeyErr
 	}
