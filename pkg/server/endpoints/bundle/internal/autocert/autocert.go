@@ -73,12 +73,6 @@ import (
 // DefaultACMEDirectory is the default ACME Directory URL used when the Manager's Client is nil.
 const DefaultACMEDirectory = "https://acme-v02.api.letsencrypt.org/directory"
 
-// createCertRetryAfter is how much time to wait before removing a failed state
-// entry due to an unsuccessful createCert call.
-// This is a variable instead of a const for testing.
-// TODO: Consider making it configurable or an exp backoff?
-var createCertRetryAfter = time.Minute
-
 // pseudoRand is safe for concurrent use.
 var pseudoRand *lockedMathRand
 
@@ -205,6 +199,11 @@ type Manager struct {
 	// The field value is passed to crypto/x509.CreateCertificateRequest
 	// in the template's ExtraExtensions field as is.
 	ExtraExtensions []pkix.Extension
+
+	// CreateCertRetryAfter is how much time to wait before removing a failed state
+	// entry due to an unsuccessful createCert call.
+	// If zero, time.Minute is used.
+	CreateCertRetryAfter time.Duration
 
 	clientMu sync.Mutex
 	client   *acme.Client // initialized by acmeClient method
@@ -592,7 +591,7 @@ func (m *Manager) createCert(ctx context.Context, ck certKey) (*tls.Certificate,
 	if err != nil {
 		// Remove the failed state after some time,
 		// making the manager call createCert again on the following TLS hello.
-		time.AfterFunc(createCertRetryAfter, func() {
+		time.AfterFunc(m.getCreateCertRetryAfter(), func() {
 			defer testDidRemoveState(ck)
 			m.stateMu.Lock()
 			defer m.stateMu.Unlock()
@@ -1091,6 +1090,13 @@ func (m *Manager) now() time.Time {
 		return m.nowFunc()
 	}
 	return time.Now()
+}
+
+func (m *Manager) getCreateCertRetryAfter() time.Duration {
+	if m.CreateCertRetryAfter > 0 {
+		return m.CreateCertRetryAfter
+	}
+	return time.Minute
 }
 
 // certState is ready when its mutex is unlocked for reading.

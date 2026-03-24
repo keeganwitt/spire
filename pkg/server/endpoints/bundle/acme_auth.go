@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/tls"
 	"fmt"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spiffe/spire/pkg/common/version"
@@ -42,6 +43,10 @@ type ACMEConfig struct {
 	// not true, and the provider requires acceptance, then certificate
 	// retrieval will fail.
 	ToSAccepted bool
+
+	// CreateCertRetryAfter is how much time to wait before removing a failed state
+	// entry due to an unsuccessful createCert call.
+	CreateCertRetryAfter time.Duration
 }
 
 func ACMEAuth(log logrus.FieldLogger, km keymanager.KeyManager, config ACMEConfig) ServerAuth {
@@ -77,6 +82,7 @@ func ACMEAuth(log logrus.FieldLogger, km keymanager.KeyManager, config ACMEConfi
 				DirectoryURL: config.DirectoryURL,
 				UserAgent:    "SPIRE-" + version.Version(),
 			},
+			CreateCertRetryAfter: config.CreateCertRetryAfter,
 			KeyStore: &acmeKeyStore{
 				log: log,
 				km:  km,

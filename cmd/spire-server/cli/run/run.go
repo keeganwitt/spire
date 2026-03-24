@@ -167,11 +167,12 @@ type bundleEndpointServingCertFile struct {
 }
 
 type bundleEndpointACMEConfig struct {
-	DirectoryURL       string                 `hcl:"directory_url"`
-	DomainName         string                 `hcl:"domain_name"`
-	Email              string                 `hcl:"email"`
-	ToSAccepted        bool                   `hcl:"tos_accepted"`
-	UnusedKeyPositions map[string][]token.Pos `hcl:",unusedKeyPositions"`
+	DirectoryURL         string                 `hcl:"directory_url"`
+	DomainName           string                 `hcl:"domain_name"`
+	Email                string                 `hcl:"email"`
+	ToSAccepted          bool                   `hcl:"tos_accepted"`
+	CreateCertRetryAfter string                 `hcl:"create_cert_retry_after"`
+	UnusedKeyPositions   map[string][]token.Pos `hcl:",unusedKeyPositions"`
 }
 
 type federatesWithConfig struct {
@@ -814,12 +815,18 @@ func setBundleEndpointConfigProfile(config *bundleEndpointConfig, dataDir string
 }
 
 func configToACMEConfig(acme *bundleEndpointACMEConfig, dataDir string) *bundle.ACMEConfig {
+	var createCertRetryAfter time.Duration
+	if acme.CreateCertRetryAfter != "" {
+		createCertRetryAfter, _ = time.ParseDuration(acme.CreateCertRetryAfter)
+	}
+
 	return &bundle.ACMEConfig{
-		DirectoryURL: acme.DirectoryURL,
-		DomainName:   acme.DomainName,
-		CacheDir:     filepath.Join(dataDir, "bundle-acme"),
-		Email:        acme.Email,
-		ToSAccepted:  acme.ToSAccepted,
+		DirectoryURL:         acme.DirectoryURL,
+		DomainName:           acme.DomainName,
+		CacheDir:             filepath.Join(dataDir, "bundle-acme"),
+		Email:                acme.Email,
+		ToSAccepted:          acme.ToSAccepted,
+		CreateCertRetryAfter: createCertRetryAfter,
 	}
 }
 
@@ -925,6 +932,12 @@ func validateConfig(c *Config) error {
 
 			if acme.Email == "" {
 				return errors.New("federation.bundle_endpoint.acme.email must be configured")
+			}
+
+			if acme.CreateCertRetryAfter != "" {
+				if _, err := time.ParseDuration(acme.CreateCertRetryAfter); err != nil {
+					return fmt.Errorf("could not parse federation.bundle_endpoint.acme.create_cert_retry_after %q: %w", acme.CreateCertRetryAfter, err)
+				}
 			}
 		}
 
