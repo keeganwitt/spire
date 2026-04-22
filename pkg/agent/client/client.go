@@ -422,11 +422,6 @@ func entryIsStale(entry *common.RegistrationEntry, revisionNumber, revisionCreat
 		return true
 	}
 
-	// TODO: remove in SPIRE 1.14
-	if revisionCreatedAt == 0 {
-		return false
-	}
-
 	// Verify that the CreatedAt of the entries match. If they are different, they are
 	// completely different entries even if the revision number is the same.
 	// This can happen for example if an entry is deleted and recreated with the
