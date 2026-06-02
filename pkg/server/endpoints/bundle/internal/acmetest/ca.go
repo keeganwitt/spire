@@ -351,22 +351,30 @@ func (ca *CAServer) handle(w http.ResponseWriter, r *http.Request) {
 
 	// Client key registration request.
 	case r.URL.Path == "/new-account":
-		ca.mu.Lock()
-		defer ca.mu.Unlock()
-		if ca.acctRegistered {
-			ca.httpErrorf(w, http.StatusServiceUnavailable, "multiple accounts are not implemented")
-			return
-		}
-		ca.acctRegistered = true
-
 		var req struct {
 			TermsOfServiceAgreed   bool `json:"termsOfServiceAgreed"`
 			ExternalAccountBinding json.RawMessage
 		}
-		if err := ca.decodePayload(&req, r.Body); err != nil {
+		key, err := ca.decodePayload(&req, r.Body)
+		if err != nil {
 			ca.httpErrorf(w, http.StatusBadRequest, "%v", err)
 			return
 		}
+
+		ca.mu.Lock()
+		defer ca.mu.Unlock()
+		if ca.acctRegistered {
+			existingKey := ca.lookupAccountKey("1")
+			if publicKeyEqual(key, existingKey) {
+				w.Header().Set("Location", ca.serverURL("/accounts/1"))
+				w.WriteHeader(http.StatusOK)
+				w.Write([]byte("{}"))
+				return
+			}
+			ca.httpErrorf(w, http.StatusServiceUnavailable, "multiple accounts are not implemented")
+			return
+		}
+
 		if !req.TermsOfServiceAgreed {
 			ca.httpErrorf(w, http.StatusBadRequest, "must agree to terms of service")
 			return
@@ -376,7 +384,8 @@ func (ca *CAServer) handle(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 
-		// TODO: Check the user account key against a ca.accountKeys?
+		ca.acctRegistered = true
+		ca.setAccountKey("1", key)
 		w.Header().Set("Location", ca.serverURL("/accounts/1"))
 		w.WriteHeader(http.StatusCreated)
 		w.Write([]byte("{}"))
@@ -386,7 +395,7 @@ func (ca *CAServer) handle(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			Identifiers []struct{ Value string }
 		}
-		if err := ca.decodePayload(&req, r.Body); err != nil {
+		if _, err := ca.decodePayload(&req, r.Body); err != nil {
 			ca.httpErrorf(w, http.StatusBadRequest, "%v", err)
 			return
 		}
@@ -445,7 +454,7 @@ func (ca *CAServer) handle(w http.ResponseWriter, r *http.Request) {
 	// Get authorization status requests.
 	case strings.HasPrefix(r.URL.Path, "/authz/"):
 		var req struct{ Status string }
-		ca.decodePayload(&req, r.Body)
+		_, _ = ca.decodePayload(&req, r.Body)
 		deactivate := req.Status == "deactivated"
 		ca.mu.Lock()
 		defer ca.mu.Unlock()
@@ -482,7 +491,7 @@ func (ca *CAServer) handle(w http.ResponseWriter, r *http.Request) {
 		var req struct {
 			CSR string `json:"csr"`
 		}
-		ca.decodePayload(&req, r.Body)
+		_, _ = ca.decodePayload(&req, r.Body)
 		b, _ := base64.RawURLEncoding.DecodeString(req.CSR)
 		csr, err := x509.ParseCertificateRequest(b)
 		if err != nil {
@@ -826,17 +835,17 @@ func (ca *CAServer) verifyHTTPChallenge(a *authorization) error {
 	return nil
 }
 
-func (ca *CAServer) decodePayload(v any, r io.Reader) error {
+func (ca *CAServer) decodePayload(v any, r io.Reader) (any, error) {
 	buf := new(bytes.Buffer)
 	if _, err := buf.ReadFrom(r); err != nil {
-		return errors.New("unable to read JOSE body")
+		return nil, errors.New("unable to read JOSE body")
 	}
 	jws, err := jose.ParseSigned(buf.String(), allowedJWTSignatureAlgorithms)
 	if err != nil {
-		return errors.New("malformed JOSE body")
+		return nil, errors.New("malformed JOSE body")
 	}
 	if len(jws.Signatures) == 0 {
-		return errors.New("invalid JOSE body; no signatures")
+		return nil, errors.New("invalid JOSE body; no signatures")
 	}
 	sig := jws.Signatures[0]
 	jwk := sig.Protected.JSONWebKey
@@ -844,36 +853,34 @@ func (ca *CAServer) decodePayload(v any, r io.Reader) error {
 	var key any
 	switch {
 	case jwk == nil && kid == "":
-		return errors.New("invalid JOSE body; missing jwk or keyid in header")
+		return nil, errors.New("invalid JOSE body; missing jwk or keyid in header")
 	case jwk != nil && kid != "":
-		return errors.New("invalid JOSE body; both jwk and keyid in header")
+		return nil, errors.New("invalid JOSE body; both jwk and keyid in header")
 	case jwk != nil:
 		key = jwk.Key
 	case kid != "":
 		// TODO: strict validation of keyid
 		idx := strings.LastIndex(kid, "/")
 		if idx < 0 {
-			return errors.New("invalid JOSE body; keyid is not URL to account")
+			return nil, errors.New("invalid JOSE body; keyid is not URL to account")
 		}
 		kid = kid[idx+1:]
 		key = ca.lookupAccountKey(kid)
 		if key == nil {
-			return errors.New("invalid JOSE body; keyid is not for a known account")
+			return nil, errors.New("invalid JOSE body; keyid is not for a known account")
 		}
 	}
 
 	// payload := jws.UnsafePayloadWithoutVerification()
 	payload, err := jws.Verify(key)
 	if err != nil {
-		return fmt.Errorf("invalid signature: %v", err)
+		return nil, fmt.Errorf("invalid signature: %v", err)
 	}
 	if err := json.Unmarshal(payload, v); err != nil {
-		return errors.New("malformed payload")
+		return nil, errors.New("malformed payload")
 	}
 
-	// TODO: calculate per-account key id
-	ca.setAccountKey("1", key)
-	return nil
+	return key, nil
 }
 
 func (ca *CAServer) lookupAccountKey(kid string) any {
@@ -886,6 +893,16 @@ func (ca *CAServer) setAccountKey(kid string, key any) {
 	ca.accountKeysMu.Lock()
 	defer ca.accountKeysMu.Unlock()
 	ca.accountKeys[kid] = key
+}
+
+func publicKeyEqual(a, b any) bool {
+	type equalizer interface {
+		Equal(any) bool
+	}
+	if a, ok := a.(equalizer); ok {
+		return a.Equal(b)
+	}
+	return false
 }
 
 func challengeToken(domain, challType string, authzID int) string {
