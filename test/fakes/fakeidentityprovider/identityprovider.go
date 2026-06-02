@@ -12,8 +12,9 @@ import (
 type IdentityProvider struct {
 	identityproviderv1.UnsafeIdentityProviderServer
 
-	mu      sync.Mutex
-	bundles []*plugintypes.Bundle
+	mu         sync.Mutex
+	bundles    []*plugintypes.Bundle
+	identities []*identityproviderv1.X509Identity
 }
 
 func New() *IdentityProvider {
@@ -31,9 +32,15 @@ func (c *IdentityProvider) FetchX509Identity(context.Context, *identityproviderv
 	bundle := c.bundles[0]
 	c.bundles = c.bundles[1:]
 
-	// TODO: support sending back the identity
+	var identity *identityproviderv1.X509Identity
+	if len(c.identities) > 0 {
+		identity = c.identities[0]
+		c.identities = c.identities[1:]
+	}
+
 	return &identityproviderv1.FetchX509IdentityResponse{
-		Bundle: bundle,
+		Bundle:   bundle,
+		Identity: identity,
 	}, nil
 }
 
@@ -41,4 +48,10 @@ func (c *IdentityProvider) AppendBundle(bundle *plugintypes.Bundle) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.bundles = append(c.bundles, bundle)
+}
+
+func (c *IdentityProvider) AppendIdentity(identity *identityproviderv1.X509Identity) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.identities = append(c.identities, identity)
 }
