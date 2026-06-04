@@ -47,8 +47,9 @@ const (
 )
 
 var (
-	validTagKeyPattern   = regexp.MustCompile(`^[\p{L}\p{N}\s+\-=._:/@]+$`)
-	validTagValuePattern = regexp.MustCompile(`^[\p{L}\p{N}\s+\-=._:/@]*$`)
+	invalidKeyIdentifierPattern = regexp.MustCompile(".*[^A-z0-9/_-].*")
+	validTagKeyPattern          = regexp.MustCompile(`^[\p{L}\p{N}\s+\-=._:/@]+$`)
+	validTagValuePattern        = regexp.MustCompile(`^[\p{L}\p{N}\s+\-=._:/@]*$`)
 )
 
 func BuiltIn() catalog.BuiltIn {
@@ -121,8 +122,7 @@ func buildConfig(coreConfig catalog.CoreConfig, hclText string, status *pluginco
 	}
 
 	if newConfig.KeyIdentifierValue != "" {
-		re := regexp.MustCompile(".*[^A-z0-9/_-].*")
-		if re.MatchString(newConfig.KeyIdentifierValue) {
+		if invalidKeyIdentifierPattern.MatchString(newConfig.KeyIdentifierValue) {
 			status.ReportError("Key identifier must contain only alphanumeric characters, forward slashes (/), underscores (_), and dashes (-)")
 		}
 		if strings.HasPrefix(newConfig.KeyIdentifierValue, "alias/aws/") {
