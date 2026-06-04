@@ -1315,14 +1315,7 @@ func deleteBundle(tx *gorm.DB, trustDomainID string, mode datastore.DeleteMode) 
 	if entriesCount > 0 {
 		switch mode {
 		case datastore.Delete:
-			// TODO: figure out how to do this gracefully with GORM.
-			if err := tx.Exec(bindVars(tx, `DELETE FROM registered_entries WHERE id in (
-				SELECT
-					registered_entry_id
-				FROM
-					federated_registration_entries
-				WHERE
-					bundle_id = ?)`), model.ID).Error; err != nil {
+			if err := tx.Where("id IN (?)", tx.Table("federated_registration_entries").Select("registered_entry_id").Where("bundle_id = ?", model.ID).SubQuery()).Delete(&RegisteredEntry{}).Error; err != nil {
 				return newWrappedSQLError(err)
 			}
 		case datastore.Dissociate:
