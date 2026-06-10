@@ -600,6 +600,10 @@ func (f *fakeCAManager) RotateJWTKey(context.Context) {
 	f.jwtKeyCh <- struct{}{}
 }
 
+func (f *fakeCAManager) SyncJWTKeyAuthority(context.Context) error {
+	return nil
+}
+
 func (f *fakeCAManager) GetCurrentWITKeySlot() manager.Slot {
 	return f.currentWITKeySlot
 }

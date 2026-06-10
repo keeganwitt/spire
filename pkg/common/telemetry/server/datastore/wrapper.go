@@ -352,3 +352,21 @@ func (w metricsWrapper) PruneCAJournals(ctx context.Context, allCAsExpireBefore 
 	defer callCounter.Done(&err)
 	return w.ds.PruneCAJournals(ctx, allCAsExpireBefore)
 }
+
+func (w metricsWrapper) AcquireJWTSigningAuthority(ctx context.Context, trustDomain, candidateServerID string, now time.Time, ttl time.Duration) (_ *datastore.JWTSigningAuthorityLease, _ bool, err error) {
+	callCounter := StartAcquireJWTSigningAuthority(w.m)
+	defer callCounter.Done(&err)
+	return w.ds.AcquireJWTSigningAuthority(ctx, trustDomain, candidateServerID, now, ttl)
+}
+
+func (w metricsWrapper) SaveJWTSigningAuthority(ctx context.Context, lease *datastore.JWTSigningAuthorityLease) (err error) {
+	callCounter := StartSaveJWTSigningAuthority(w.m)
+	defer callCounter.Done(&err)
+	return w.ds.SaveJWTSigningAuthority(ctx, lease)
+}
+
+func (w metricsWrapper) FetchJWTSigningAuthority(ctx context.Context, trustDomain string) (_ *datastore.JWTSigningAuthorityLease, err error) {
+	callCounter := StartFetchJWTSigningAuthority(w.m)
+	defer callCounter.Done(&err)
+	return w.ds.FetchJWTSigningAuthority(ctx, trustDomain)
+}

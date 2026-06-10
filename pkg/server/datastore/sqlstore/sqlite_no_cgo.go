@@ -21,3 +21,7 @@ func (s sqliteDB) connect(ctx context.Context, cfg *configuration, isReadOnly bo
 func (s sqliteDB) isConstraintViolation(err error) bool {
 	return false
 }
+
+func (s sqliteDB) isDeadlock(error) bool {
+	return false
+}

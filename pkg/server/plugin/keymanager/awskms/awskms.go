@@ -26,6 +26,7 @@ import (
 	"github.com/spiffe/spire/pkg/common/catalog"
 	"github.com/spiffe/spire/pkg/common/diskutil"
 	"github.com/spiffe/spire/pkg/common/pluginconf"
+	"github.com/spiffe/spire/pkg/server/plugin/keymanager"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
 )
@@ -33,6 +34,8 @@ import (
 const (
 	pluginName  = "aws_kms"
 	aliasPrefix = "alias/SPIRE_SERVER/"
+
+	sharedAliasSegment = "shared"
 
 	keyArnTag    = "key_arn"
 	aliasNameTag = "alias_name"
@@ -96,6 +99,7 @@ type Plugin struct {
 	hooks          pluginHooks
 	keyPolicy      *string
 	keyTags        []types.Tag
+	sharedJWTKeys  bool
 }
 
 // Config provides configuration context for the plugin
@@ -107,6 +111,7 @@ type Config struct {
 	KeyIdentifierValue string            `hcl:"key_identifier_value" json:"key_identifier_value"`
 	KeyPolicyFile      string            `hcl:"key_policy_file" json:"key_policy_file"`
 	KeyTags            map[string]string `hcl:"key_tags" json:"key_tags"`
+	SharedJWTKeys      bool              `hcl:"shared_jwt_keys" json:"shared_jwt_keys"`
 }
 
 func buildConfig(coreConfig catalog.CoreConfig, hclText string, status *pluginconf.Status) *Config {
@@ -216,10 +221,11 @@ func (p *Plugin) Configure(ctx context.Context, req *configv1.ConfigureRequest) 
 	}
 
 	fetcher := &keyFetcher{
-		log:         p.log,
-		kmsClient:   kc,
-		serverID:    serverID,
-		trustDomain: req.CoreConfiguration.TrustDomain,
+		log:           p.log,
+		kmsClient:     kc,
+		serverID:      serverID,
+		trustDomain:   req.CoreConfiguration.TrustDomain,
+		sharedJWTKeys: newConfig.SharedJWTKeys,
 	}
 	p.log.Debug("Fetching key aliases from KMS")
 	keyEntries, err := fetcher.fetchKeyEntries(ctx)
@@ -235,6 +241,7 @@ func (p *Plugin) Configure(ctx context.Context, req *configv1.ConfigureRequest) 
 	p.stsClient = sc
 	p.trustDomain = req.CoreConfiguration.TrustDomain
 	p.serverID = serverID
+	p.sharedJWTKeys = newConfig.SharedJWTKeys
 
 	if len(newConfig.KeyTags) > 0 {
 		p.keyTags = buildKeyTags(newConfig.KeyTags)
@@ -335,22 +342,74 @@ func (p *Plugin) SignData(ctx context.Context, req *keymanagerv1.SignDataRequest
 }
 
 // GetPublicKey returns the public key for a given key
-func (p *Plugin) GetPublicKey(_ context.Context, req *keymanagerv1.GetPublicKeyRequest) (*keymanagerv1.GetPublicKeyResponse, error) {
+func (p *Plugin) GetPublicKey(ctx context.Context, req *keymanagerv1.GetPublicKeyRequest) (*keymanagerv1.GetPublicKeyResponse, error) {
 	if req.KeyId == "" {
 		return nil, status.Error(codes.InvalidArgument, "key id is required")
 	}
 
 	p.mu.RLock()
-	defer p.mu.RUnlock()
-
 	entry, ok := p.entries[req.KeyId]
+	p.mu.RUnlock()
+
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "key %q not found", req.KeyId)
+		var err error
+		entry, ok, err = p.fetchSharedKeyOnMiss(ctx, req.KeyId)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, status.Errorf(codes.NotFound, "key %q not found", req.KeyId)
+		}
 	}
 
 	return &keymanagerv1.GetPublicKeyResponse{
 		PublicKey: entry.PublicKey,
 	}, nil
+}
+
+func (p *Plugin) fetchSharedKeyOnMiss(ctx context.Context, spireKeyID string) (keyEntry, bool, error) {
+	if !p.sharedJWTKeys || !keymanager.IsSharedKeyID(spireKeyID) {
+		return keyEntry{}, false, nil
+	}
+
+	aliasName := p.aliasFromSpireKeyID(spireKeyID)
+	describeResp, err := p.kmsClient.DescribeKey(ctx, &kms.DescribeKeyInput{KeyId: aws.String(aliasName)})
+	switch {
+	case err != nil:
+		return keyEntry{}, false, nil //nolint:nilerr // the shared key may not exist yet; treat as not found so the caller retries
+	case describeResp == nil || describeResp.KeyMetadata == nil || describeResp.KeyMetadata.Arn == nil || !describeResp.KeyMetadata.Enabled:
+		return keyEntry{}, false, nil
+	}
+
+	keyType, ok := keyTypeFromKeySpec(describeResp.KeyMetadata.KeySpec)
+	if !ok {
+		return keyEntry{}, false, status.Errorf(codes.Internal, "unsupported key spec: %v", describeResp.KeyMetadata.KeySpec)
+	}
+
+	pub, err := p.kmsClient.GetPublicKey(ctx, &kms.GetPublicKeyInput{KeyId: aws.String(aliasName)})
+	switch {
+	case err != nil:
+		return keyEntry{}, false, status.Errorf(codes.Internal, "failed to get public key: %v", err)
+	case pub == nil || len(pub.PublicKey) == 0:
+		return keyEntry{}, false, status.Error(codes.Internal, "malformed get public key response")
+	}
+
+	entry := keyEntry{
+		Arn:       *describeResp.KeyMetadata.Arn,
+		AliasName: aliasName,
+		PublicKey: &keymanagerv1.PublicKey{
+			Id:          spireKeyID,
+			Type:        keyType,
+			PkixData:    pub.PublicKey,
+			Fingerprint: makeFingerprint(pub.PublicKey),
+		},
+	}
+
+	p.mu.Lock()
+	p.entries[spireKeyID] = entry
+	p.mu.Unlock()
+
+	return entry, true, nil
 }
 
 // GetPublicKeys return the publicKey for all the keys
@@ -639,6 +698,9 @@ func (p *Plugin) disposeAliases(ctx context.Context) error {
 			// if alias belongs to current server skip
 			case strings.HasPrefix(*alias.AliasName, p.aliasPrefixForServer()):
 				continue
+			// if alias is a shared key skip; it is managed by the JWT authority writer
+			case p.sharedJWTKeys && strings.HasPrefix(*alias.AliasName, p.aliasPrefixForShared()+"/"):
+				continue
 			}
 
 			now := p.hooks.clk.Now()
@@ -797,7 +859,14 @@ func (p *Plugin) disposeKeys(ctx context.Context) error {
 }
 
 func (p *Plugin) aliasFromSpireKeyID(spireKeyID string) string {
+	if p.sharedJWTKeys && keymanager.IsSharedKeyID(spireKeyID) {
+		return path.Join(p.aliasPrefixForShared(), encodeKeyID(spireKeyID))
+	}
 	return path.Join(p.aliasPrefixForServer(), encodeKeyID(spireKeyID))
+}
+
+func (p *Plugin) aliasPrefixForShared() string {
+	return path.Join(p.aliasPrefixForTrustDomain(), sharedAliasSegment)
 }
 
 func (p *Plugin) descriptionFromSpireKeyID(spireKeyID string) string {

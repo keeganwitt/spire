@@ -452,6 +452,27 @@ func (s *DataStore) SetCAJournal(ctx context.Context, caJournal *datastore.CAJou
 	return s.ds.SetCAJournal(ctx, caJournal)
 }
 
+func (s *DataStore) AcquireJWTSigningAuthority(ctx context.Context, trustDomain, candidateServerID string, now time.Time, ttl time.Duration) (*datastore.JWTSigningAuthorityLease, bool, error) {
+	if err := s.getNextError(); err != nil {
+		return nil, false, err
+	}
+	return s.ds.AcquireJWTSigningAuthority(ctx, trustDomain, candidateServerID, now, ttl)
+}
+
+func (s *DataStore) SaveJWTSigningAuthority(ctx context.Context, lease *datastore.JWTSigningAuthorityLease) error {
+	if err := s.getNextError(); err != nil {
+		return err
+	}
+	return s.ds.SaveJWTSigningAuthority(ctx, lease)
+}
+
+func (s *DataStore) FetchJWTSigningAuthority(ctx context.Context, trustDomain string) (*datastore.JWTSigningAuthorityLease, error) {
+	if err := s.getNextError(); err != nil {
+		return nil, err
+	}
+	return s.ds.FetchJWTSigningAuthority(ctx, trustDomain)
+}
+
 func (s *DataStore) PruneCAJournals(ctx context.Context, allCAsExpireBefore int64) error {
 	if err := s.getNextError(); err != nil {
 		return err

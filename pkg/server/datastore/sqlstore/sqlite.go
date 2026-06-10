@@ -49,6 +49,12 @@ func (s sqliteDB) isConstraintViolation(err error) bool {
 	return ok && e.Code == sqlite3.ErrConstraint
 }
 
+func (s sqliteDB) isDeadlock(error) bool {
+	// withTx serializes sqlite writes in-process, so sqlite does not surface
+	// the cross-transaction deadlocks MySQL/Postgres can.
+	return false
+}
+
 func openSQLite3(connString string) (*gorm.DB, error) {
 	embellished, err := embellishSQLite3ConnString(connString)
 	if err != nil {

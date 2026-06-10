@@ -73,3 +73,9 @@ func (p postgresDB) isConstraintViolation(err error) bool {
 	// "23xxx" is the constraint violation class for PostgreSQL
 	return ok && e.Code.Class() == "23"
 }
+
+func (p postgresDB) isDeadlock(err error) bool {
+	var e *pq.Error
+	ok := errors.As(err, &e)
+	return ok && e.Code == "40P01" // deadlock_detected
+}

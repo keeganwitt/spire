@@ -13,6 +13,7 @@ import (
 	"github.com/spiffe/spire/pkg/common/catalog"
 	"github.com/spiffe/spire/pkg/common/diskutil"
 	"github.com/spiffe/spire/pkg/common/pluginconf"
+	"github.com/spiffe/spire/pkg/server/plugin/keymanager"
 	keymanagerbase "github.com/spiffe/spire/pkg/server/plugin/keymanager/base"
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -35,7 +36,8 @@ func asBuiltIn(p *KeyManager) catalog.BuiltIn {
 }
 
 type configuration struct {
-	KeysPath string `hcl:"keys_path"`
+	KeysPath       string `hcl:"keys_path"`
+	SharedKeysPath string `hcl:"shared_keys_path"`
 }
 
 func buildConfig(coreConfig catalog.CoreConfig, hclText string, status *pluginconf.Status) *configuration {
@@ -56,8 +58,9 @@ type KeyManager struct {
 	*keymanagerbase.Base
 	configv1.UnimplementedConfigServer
 
-	mu     sync.Mutex
-	config *configuration
+	mu             sync.Mutex
+	config         *configuration
+	wroteSharedKey bool
 }
 
 func newKeyManager(generator Generator) *KeyManager {
@@ -101,6 +104,13 @@ func (m *KeyManager) configure(config *configuration) error {
 		if err != nil {
 			return err
 		}
+		if config.SharedKeysPath != "" {
+			sharedEntries, err := loadEntries(config.SharedKeysPath)
+			if err != nil {
+				return err
+			}
+			entries = append(entries, sharedEntries...)
+		}
 		m.Base.SetEntries(entries)
 	}
 
@@ -111,13 +121,79 @@ func (m *KeyManager) configure(config *configuration) error {
 func (m *KeyManager) writeEntries(_ context.Context, entries []*keymanagerbase.KeyEntry) error {
 	m.mu.Lock()
 	config := m.config
+	wroteSharedKey := m.wroteSharedKey
 	m.mu.Unlock()
 
 	if config == nil {
 		return status.Error(codes.FailedPrecondition, "not configured")
 	}
 
-	return writeEntries(config.KeysPath, entries)
+	if config.SharedKeysPath == "" {
+		return writeEntries(config.KeysPath, entries)
+	}
+
+	var privateEntries, sharedEntries []*keymanagerbase.KeyEntry
+	for _, entry := range entries {
+		if keymanager.IsSharedKeyID(entry.Id) {
+			sharedEntries = append(sharedEntries, entry)
+		} else {
+			privateEntries = append(privateEntries, entry)
+		}
+	}
+
+	if err := writeEntries(config.KeysPath, privateEntries); err != nil {
+		return err
+	}
+	if wroteSharedKey {
+		if err := writeEntries(config.SharedKeysPath, sharedEntries); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (m *KeyManager) GenerateKey(ctx context.Context, req *keymanagerv1.GenerateKeyRequest) (*keymanagerv1.GenerateKeyResponse, error) {
+	if keymanager.IsSharedKeyID(req.KeyId) {
+		m.mu.Lock()
+		m.wroteSharedKey = true
+		m.mu.Unlock()
+	}
+	return m.Base.GenerateKey(ctx, req)
+}
+
+func (m *KeyManager) GetPublicKey(ctx context.Context, req *keymanagerv1.GetPublicKeyRequest) (*keymanagerv1.GetPublicKeyResponse, error) {
+	if err := m.refreshSharedEntries(); err != nil {
+		return nil, err
+	}
+	return m.Base.GetPublicKey(ctx, req)
+}
+
+func (m *KeyManager) GetPublicKeys(ctx context.Context, req *keymanagerv1.GetPublicKeysRequest) (*keymanagerv1.GetPublicKeysResponse, error) {
+	if err := m.refreshSharedEntries(); err != nil {
+		return nil, err
+	}
+	return m.Base.GetPublicKeys(ctx, req)
+}
+
+func (m *KeyManager) refreshSharedEntries() error {
+	m.mu.Lock()
+	config := m.config
+	m.mu.Unlock()
+
+	if config == nil || config.SharedKeysPath == "" {
+		return nil
+	}
+
+	privateEntries, err := loadEntries(config.KeysPath)
+	if err != nil {
+		return err
+	}
+	sharedEntries, err := loadEntries(config.SharedKeysPath)
+	if err != nil {
+		return err
+	}
+	m.Base.SetEntries(append(privateEntries, sharedEntries...))
+	return nil
 }
 
 type entriesData struct {

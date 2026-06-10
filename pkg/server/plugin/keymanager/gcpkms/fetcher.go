@@ -140,6 +140,11 @@ func getSPIREKeyIDFromCryptoKeyName(cryptoKeyName string) (string, bool) {
 		return "", false
 	}
 
+	// Shared JWT keys use a deterministic name: spire-key-shared-<SPIRE-KEY-ID>.
+	if sharedPrefix := cryptoKeyNamePrefix + "-" + cryptoKeyNameSharedInfix + "-"; strings.HasPrefix(cryptoKeyName[i+1:], sharedPrefix) {
+		return cryptoKeyName[i+1+len(sharedPrefix):], true
+	}
+
 	// The i index will indicate us where
 	// "spire-key-1f2e225a-91d8-4589-a4fe-f88b7bb04bac-x509-CA-A" starts.
 	// Now we have to get the position where the SPIRE Key ID starts.

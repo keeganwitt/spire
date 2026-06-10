@@ -5244,6 +5244,9 @@ func (s *PluginSuite) TestMigration() {
 			case 24:
 				// Migration from v24 to v25 adds additional_attributes column
 				prepareDB(true)
+			case 25:
+				// Migration from v25 to v26 adds the jwt_signing_authorities table
+				prepareDB(true)
 			default:
 				t.Fatalf("no migration test added for schema version %d", schemaVersion)
 			}

@@ -1,7 +1,6 @@
 package manager
 
 import (
-	"bytes"
 	"context"
 	"crypto"
 	"crypto/rand"
@@ -12,6 +11,7 @@ import (
 	"time"
 
 	"github.com/andres-erbsen/clock"
+	"github.com/google/uuid"
 	"github.com/sirupsen/logrus"
 	"github.com/spiffe/go-spiffe/v2/spiffeid"
 	"github.com/spiffe/spire/pkg/common/backoff"
@@ -92,6 +92,7 @@ type Config struct {
 	DisableWITSVIDs bool
 	JWTKeyType      keymanager.KeyType
 	WITKeyType      keymanager.KeyType
+	JWTKeySharing   bool
 	Dir             string
 	Log             logrus.FieldLogger
 	Metrics         telemetry.Metrics
@@ -113,6 +114,12 @@ type Manager struct {
 	currentJWTKey *jwtKeySlot
 	nextJWTKey    *jwtKeySlot
 	jwtKeyMutex   sync.RWMutex
+
+	jwtKeySharing  bool
+	serverID       string
+	jwtWriter      bool
+	jwtLease       *datastore.JWTSigningAuthorityLease
+	jwtAuthorityMu sync.Mutex
 
 	currentWITKey *witKeySlot
 	nextWITKey    *witKeySlot
@@ -137,6 +144,11 @@ func NewManager(ctx context.Context, c Config) (*Manager, error) {
 		caTTL:                        c.CredBuilder.Config().X509CATTL,
 		bundleUpdatedCh:              make(chan struct{}, 1),
 		taintedUpstreamAuthoritiesCh: make(chan []*x509.Certificate, 1),
+		jwtKeySharing:                c.JWTKeySharing,
+	}
+
+	if c.JWTKeySharing {
+		m.serverID = uuid.NewString()
 	}
 
 	if upstreamAuthority, ok := c.Catalog.GetUpstreamAuthority(); ok {
@@ -363,6 +375,10 @@ func (m *Manager) PrepareJWTKey(ctx context.Context) (err error) {
 		return nil
 	}
 
+	if m.jwtKeySharing && !m.isJWTWriter() {
+		return nil
+	}
+
 	counter := telemetry_server.StartServerCAManagerPrepareJWTKeyCall(m.c.Metrics)
 	defer counter.Done(&err)
 
@@ -419,6 +435,10 @@ func (m *Manager) PrepareJWTKey(ctx context.Context) (err error) {
 		telemetry.Expiration:       slot.jwtKey.NotAfter,
 		telemetry.LocalAuthorityID: slot.authorityID,
 	}).Info("JWT key prepared")
+
+	if m.jwtKeySharing {
+		m.persistJWTAuthorityState(ctx)
+	}
 	return nil
 }
 
@@ -426,14 +446,23 @@ func (m *Manager) ActivateJWTKey(ctx context.Context) {
 	if m.IsJWTSVIDsDisabled() {
 		return
 	}
+	if m.jwtKeySharing && !m.isJWTWriter() {
+		return
+	}
 	m.jwtKeyMutex.RLock()
 	defer m.jwtKeyMutex.RUnlock()
 
 	m.activateJWTKey(ctx)
+	if m.jwtKeySharing {
+		m.persistJWTAuthorityState(ctx)
+	}
 }
 
 func (m *Manager) RotateJWTKey(ctx context.Context) {
 	if m.IsJWTSVIDsDisabled() {
+		return
+	}
+	if m.jwtKeySharing && !m.isJWTWriter() {
 		return
 	}
 
@@ -448,6 +477,9 @@ func (m *Manager) RotateJWTKey(ctx context.Context) {
 	}
 
 	m.activateJWTKey(ctx)
+	if m.jwtKeySharing {
+		m.persistJWTAuthorityState(ctx)
+	}
 }
 
 // PublishJWTKey publishes the passed JWK to the upstream server using the configured
@@ -1208,7 +1240,7 @@ func (u *bundleUpdater) appendBundle(ctx context.Context, bundle *common.Bundle)
 }
 
 func newJWTKey(signer crypto.Signer, expiresAt time.Time) (*ca.JWTKey, error) {
-	kid, err := newKeyID()
+	kid, err := deterministicKeyID(signer)
 	if err != nil {
 		return nil, err
 	}
@@ -1221,7 +1253,7 @@ func newJWTKey(signer crypto.Signer, expiresAt time.Time) (*ca.JWTKey, error) {
 }
 
 func newWITKey(signer crypto.Signer, expiresAt time.Time) (*ca.WITKey, error) {
-	kid, err := newKeyID()
+	kid, err := deterministicKeyID(signer)
 	if err != nil {
 		return nil, err
 	}
@@ -1233,22 +1265,12 @@ func newWITKey(signer crypto.Signer, expiresAt time.Time) (*ca.WITKey, error) {
 	}, nil
 }
 
-func newKeyID() (string, error) {
-	choices := make([]byte, 32)
-	_, err := rand.Read(choices)
+func deterministicKeyID(signer crypto.Signer) (string, error) {
+	subjectKeyID, err := x509util.GetSubjectKeyID(signer.Public())
 	if err != nil {
 		return "", err
 	}
-	return keyIDFromBytes(choices), nil
-}
-
-func keyIDFromBytes(choices []byte) string {
-	const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	buf := new(bytes.Buffer)
-	for _, choice := range choices {
-		buf.WriteByte(alphabet[int(choice)%len(alphabet)])
-	}
-	return buf.String()
+	return x509util.SubjectKeyIDToString(subjectKeyID), nil
 }
 
 func publicKeyFromJWTKey(jwtKey *ca.JWTKey) (*common.PublicKey, error) {

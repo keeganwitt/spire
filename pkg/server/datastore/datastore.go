@@ -86,6 +86,11 @@ type DataStore interface {
 	FetchCAJournal(ctx context.Context, activeX509AuthorityID string) (*CAJournal, error)
 	PruneCAJournals(ctx context.Context, allCAsExpireBefore int64) error
 	ListCAJournalsForTesting(ctx context.Context) ([]*CAJournal, error)
+
+	// JWT Signing Authority
+	AcquireJWTSigningAuthority(ctx context.Context, trustDomain, candidateServerID string, now time.Time, ttl time.Duration) (*JWTSigningAuthorityLease, bool, error)
+	SaveJWTSigningAuthority(ctx context.Context, lease *JWTSigningAuthorityLease) error
+	FetchJWTSigningAuthority(ctx context.Context, trustDomain string) (*JWTSigningAuthorityLease, error)
 }
 
 // DataConsistency indicates the required data consistency for a read operation.
@@ -220,6 +225,15 @@ type CAJournal struct {
 	ID                    uint
 	Data                  []byte
 	ActiveX509AuthorityID string
+}
+
+type JWTSigningAuthorityLease struct {
+	TrustDomain    string
+	HolderServerID string
+	Expiry         int64
+	FencingToken   int64
+	ActiveJWTKid   string
+	Data           []byte
 }
 
 type ListRegistrationEntriesResponse struct {

@@ -14,6 +14,8 @@ const (
 	// should be used with other tags to add clarity
 	Activate = "activate"
 
+	Acquire = "acquire"
+
 	// Append functionality related to appending some element (such as part of a bundle);
 	// should be used with other tags to add clarity
 	Append = "append"
@@ -180,6 +182,8 @@ const (
 
 	// CAJournal is a CA journal record
 	CAJournal = "ca_journal"
+
+	JWTSigningAuthority = "jwt_signing_authority"
 
 	// CAJournalID tags a CA journal ID
 	CAJournalID = "ca_journal_id"

@@ -3,6 +3,7 @@ package azurekeyvault
 import (
 	"context"
 	"crypto/x509"
+	"strings"
 	"sync"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/security/keyvault/azkeys"
@@ -19,6 +20,7 @@ type keyFetcher struct {
 	log            hclog.Logger
 	serverID       string
 	trustDomain    string
+	sharedJWTKeys  bool
 }
 
 // fetchKeyEntries requests Key Vault to get the list of keys that are
@@ -76,8 +78,14 @@ func (kf *keyFetcher) fetchKeyEntries(ctx context.Context) ([]*keyEntry, error) 
 
 func (kf *keyFetcher) keyBelongsToServer(key *azkeys.KeyProperties) bool {
 	trustDomain, hasTD := key.Tags[tagNameServerTrustDomain]
+	if !hasTD || *trustDomain != kf.trustDomain {
+		return false
+	}
+	if kf.sharedJWTKeys && isSharedKeyName(key.KID.Name()) {
+		return true
+	}
 	serverID, hasServerID := key.Tags[tagNameServerID]
-	return hasTD && hasServerID && *trustDomain == kf.trustDomain && *serverID == kf.serverID
+	return hasServerID && *serverID == kf.serverID
 }
 
 func (kf *keyFetcher) fetchKeyEntryDetails(ctx context.Context, keyProperties *azkeys.KeyProperties, spireKeyID string) (*keyEntry, error) {
@@ -147,6 +155,11 @@ func keyTypeFromKeySpec(keyBundle azkeys.KeyBundle) (keymanagerv1.KeyType, bool)
 // spireKeyIDFromKeyName parses a Key Vault key name to get the
 // SPIRE Key ID. This Key ID is used in the Server KeyManager interface.
 func spireKeyIDFromKeyName(keyName string) (string, bool) {
+	// Shared JWT keys use a deterministic name: spire-key-shared-<SPIRE-KEY-ID>.
+	if sharedPrefix := keyNamePrefix + "-" + sharedKeyNameInfix + "-"; strings.HasPrefix(keyName, sharedPrefix) {
+		return keyName[len(sharedPrefix):], true
+	}
+
 	// A key name would have the format spire-key-${UUID}-x509-CA-A.
 	// first we find the position where the SPIRE Key ID starts.
 	// For that, we need to add the length of the key name prefix that we

@@ -284,7 +284,7 @@ import (
 
 const (
 	// the latest schema version of the database in the code
-	latestSchemaVersion = 25
+	latestSchemaVersion = 26
 
 	// lastMinorReleaseSchemaVersion is the schema version supported by the
 	// last minor release. When the migrations are opportunistically pruned
@@ -444,6 +444,7 @@ func initDB(db *gorm.DB, dbType string, log logrus.FieldLogger) (err error) {
 		&DNSName{},
 		&FederatedTrustDomain{},
 		CAJournal{},
+		&JWTSigningAuthority{},
 	}
 
 	if err := tableOptionsForDialect(tx, dbType).AutoMigrate(tables...).Error; err != nil {
@@ -519,6 +520,8 @@ func migrateVersion(tx *gorm.DB, currVersion int, log logrus.FieldLogger) (versi
 		err = migrateToV24(tx)
 	case 24:
 		err = migrateToV25(tx)
+	case 25:
+		err = migrateToV26(tx)
 	default:
 		err = newSQLError("no migration support for unknown schema version %d", currVersion)
 	}
@@ -540,6 +543,13 @@ func migrateToV24(tx *gorm.DB) error {
 func migrateToV25(tx *gorm.DB) error {
 	// Add additional_attributes column to registered_entries table
 	if err := tx.AutoMigrate(&RegisteredEntry{}).Error; err != nil {
+		return newWrappedSQLError(err)
+	}
+	return nil
+}
+
+func migrateToV26(tx *gorm.DB) error {
+	if err := tx.AutoMigrate(&JWTSigningAuthority{}).Error; err != nil {
 		return newWrappedSQLError(err)
 	}
 	return nil

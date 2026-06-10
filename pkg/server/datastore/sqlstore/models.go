@@ -197,6 +197,21 @@ type CAJournal struct {
 	ActiveJWTAuthorityID string `gorm:"index:idx_ca_journals_active_jwt_authority_id"`
 }
 
+type JWTSigningAuthority struct {
+	Model
+
+	TrustDomain    string `gorm:"unique_index:idx_jwt_signing_authorities_trust_domain"`
+	HolderServerID string
+	Expiry         int64
+	FencingToken   int64
+	ActiveJWTKid   string
+	Data           []byte `gorm:"size:16777215"`
+}
+
+func (JWTSigningAuthority) TableName() string {
+	return "jwt_signing_authorities"
+}
+
 // Migration holds database schema version number, and
 // the SPIRE Code version number
 type Migration struct {

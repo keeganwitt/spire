@@ -36,6 +36,7 @@ type CAManager interface {
 	PrepareJWTKey(ctx context.Context) error
 	ActivateJWTKey(ctx context.Context)
 	RotateJWTKey(ctx context.Context)
+	SyncJWTKeyAuthority(ctx context.Context) error
 
 	GetCurrentWITKeySlot() manager.Slot
 	GetNextWITKeySlot() manager.Slot
@@ -161,6 +162,10 @@ func (r *Rotator) rotate(ctx context.Context) error {
 
 func (r *Rotator) rotateJWTKey(ctx context.Context) error {
 	now := r.c.Clock.Now()
+
+	if err := r.c.Manager.SyncJWTKeyAuthority(ctx); err != nil {
+		return err
+	}
 
 	currentJWTKey := r.c.Manager.GetCurrentJWTKeySlot()
 	// if there is no current keypair set, generate one

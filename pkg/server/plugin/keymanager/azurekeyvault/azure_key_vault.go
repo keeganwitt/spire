@@ -28,6 +28,7 @@ import (
 	"github.com/spiffe/spire/pkg/common/catalog"
 	"github.com/spiffe/spire/pkg/common/diskutil"
 	"github.com/spiffe/spire/pkg/common/pluginconf"
+	"github.com/spiffe/spire/pkg/server/plugin/keymanager"
 	"golang.org/x/crypto/cryptobyte"
 	"golang.org/x/crypto/cryptobyte/asn1"
 	"google.golang.org/grpc/codes"
@@ -46,6 +47,7 @@ const (
 	keyNamePrefix            = "spire-key"
 	tagNameServerID          = "spire-server-id"
 	tagNameServerTrustDomain = "spire-server-td"
+	sharedKeyNameInfix       = "shared"
 )
 
 func BuiltIn() catalog.BuiltIn {
@@ -85,6 +87,7 @@ type Config struct {
 	SubscriptionID     string `hcl:"subscription_id" json:"subscription_id"`
 	AppID              string `hcl:"app_id" json:"app_id"`
 	AppSecret          string `hcl:"app_secret" json:"app_secret"`
+	SharedJWTKeys      bool   `hcl:"shared_jwt_keys" json:"shared_jwt_keys"`
 }
 
 func buildConfig(coreConfig catalog.CoreConfig, hclText string, status *pluginconf.Status) *Config {
@@ -131,6 +134,7 @@ type Plugin struct {
 	cancelTasks    context.CancelFunc
 	hooks          pluginHooks
 	keyTags        map[string]*string
+	sharedJWTKeys  bool
 }
 
 // New returns an instantiated plugin.
@@ -217,6 +221,7 @@ func (p *Plugin) Configure(ctx context.Context, req *configv1.ConfigureRequest) 
 		log:            p.log,
 		serverID:       serverID,
 		trustDomain:    req.CoreConfiguration.TrustDomain,
+		sharedJWTKeys:  newConfig.SharedJWTKeys,
 	}
 
 	p.log.Debug("Fetching keys from Azure Key Vault", "key_vault_uri", newConfig.KeyVaultURI)
@@ -232,6 +237,7 @@ func (p *Plugin) Configure(ctx context.Context, req *configv1.ConfigureRequest) 
 	p.keyVaultClient = client
 	p.trustDomain = req.CoreConfiguration.TrustDomain
 	p.serverID = serverID
+	p.sharedJWTKeys = newConfig.SharedJWTKeys
 	p.keyTags = make(map[string]*string)
 	p.keyTags[tagNameServerTrustDomain] = new(req.CoreConfiguration.TrustDomain)
 	p.keyTags[tagNameServerID] = new(serverID)
@@ -367,7 +373,13 @@ func (p *Plugin) disposeKeys(ctx context.Context) error {
 			// Keys are enqueued for deletion when they are rotated, so we skip
 			// here the keys that belong to this server. Stale keys from other
 			// servers in the trust domain are enqueued for deletion.
-			if p.serverID == *key.Tags[tagNameServerID] {
+			serverIDTag, hasServerID := key.Tags[tagNameServerID]
+			if !hasServerID {
+				// Keys without a server-id tag (such as shared JWT keys) are not
+				// owned by a single server and must not be disposed here.
+				continue
+			}
+			if p.serverID == *serverIDTag {
 				continue
 			}
 
@@ -414,7 +426,12 @@ func (p *Plugin) GenerateKey(ctx context.Context, req *keymanagerv1.GenerateKeyR
 }
 
 func (p *Plugin) createKey(ctx context.Context, spireKeyID string, keyType keymanagerv1.KeyType) (*keyEntry, error) {
-	createKeyParameters, err := getCreateKeyParameters(keyType, p.keyTags)
+	keyTags := p.keyTags
+	if p.sharedJWTKeys && keymanager.IsSharedKeyID(spireKeyID) {
+		keyTags = map[string]*string{tagNameServerTrustDomain: p.keyTags[tagNameServerTrustDomain]}
+	}
+
+	createKeyParameters, err := getCreateKeyParameters(keyType, keyTags)
 	if err != nil {
 		return nil, err
 	}
@@ -578,22 +595,68 @@ func keyVaultKeyToRawKey(keyVaultKey *azkeys.JSONWebKey) (any, error) {
 }
 
 // GetPublicKey returns the public key for a given key
-func (p *Plugin) GetPublicKey(_ context.Context, req *keymanagerv1.GetPublicKeyRequest) (*keymanagerv1.GetPublicKeyResponse, error) {
+func (p *Plugin) GetPublicKey(ctx context.Context, req *keymanagerv1.GetPublicKeyRequest) (*keymanagerv1.GetPublicKeyResponse, error) {
 	if req.KeyId == "" {
 		return nil, status.Error(codes.InvalidArgument, "key id is required")
 	}
 
-	p.entriesMtx.RLock()
-	defer p.entriesMtx.RUnlock()
-
-	entry, ok := p.entries[req.KeyId]
+	entry, ok := p.getKeyEntry(req.KeyId)
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "key %q not found", req.KeyId)
+		var err error
+		entry, ok, err = p.fetchSharedKeyOnMiss(ctx, req.KeyId)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, status.Errorf(codes.NotFound, "key %q not found", req.KeyId)
+		}
 	}
 
 	return &keymanagerv1.GetPublicKeyResponse{
 		PublicKey: entry.PublicKey,
 	}, nil
+}
+
+func (p *Plugin) fetchSharedKeyOnMiss(ctx context.Context, spireKeyID string) (keyEntry, bool, error) {
+	if !p.sharedJWTKeys || !keymanager.IsSharedKeyID(spireKeyID) {
+		return keyEntry{}, false, nil
+	}
+
+	resp, err := p.keyVaultClient.GetKey(ctx, sharedKeyName(spireKeyID), "", nil)
+	if err != nil {
+		return keyEntry{}, false, nil //nolint:nilerr // the shared key may not exist yet; treat as not found so the caller retries
+	}
+	if resp.KeyBundle.Attributes == nil || resp.KeyBundle.Attributes.Enabled == nil || !*resp.KeyBundle.Attributes.Enabled {
+		return keyEntry{}, false, nil
+	}
+
+	keyType, ok := keyTypeFromKeySpec(resp.KeyBundle)
+	if !ok {
+		return keyEntry{}, false, status.Errorf(codes.Internal, "unsupported key spec for shared key %q", spireKeyID)
+	}
+
+	rawKey, err := keyVaultKeyToRawKey(resp.Key)
+	if err != nil {
+		return keyEntry{}, false, err
+	}
+	publicKey, err := x509.MarshalPKIXPublicKey(rawKey)
+	if err != nil {
+		return keyEntry{}, false, status.Errorf(codes.Internal, "failed to marshal public key: %v", err)
+	}
+
+	entry := keyEntry{
+		KeyID:      string(*resp.Key.KID),
+		KeyName:    resp.Key.KID.Name(),
+		keyVersion: resp.Key.KID.Version(),
+		PublicKey: &keymanagerv1.PublicKey{
+			Id:          spireKeyID,
+			Type:        keyType,
+			PkixData:    publicKey,
+			Fingerprint: makeFingerprint(publicKey),
+		},
+	}
+	p.setKeyEntry(spireKeyID, entry)
+	return entry, true, nil
 }
 
 // GetPublicKeys return the publicKey for all the keys
@@ -706,12 +769,24 @@ func getCreateKeyParameters(keyType keymanagerv1.KeyType, keyTags map[string]*st
 // where UUID is a new randomly generated UUID and SPIRE-KEY-ID is provided
 // through the spireKeyID parameter.
 func (p *Plugin) generateKeyName(spireKeyID string) (keyName string, err error) {
+	if p.sharedJWTKeys && keymanager.IsSharedKeyID(spireKeyID) {
+		return sharedKeyName(spireKeyID), nil
+	}
+
 	uniqueID, err := generateUniqueID()
 	if err != nil {
 		return "", err
 	}
 
 	return fmt.Sprintf("%s-%s-%s", keyNamePrefix, uniqueID, spireKeyID), nil
+}
+
+func sharedKeyName(spireKeyID string) string {
+	return fmt.Sprintf("%s-%s-%s", keyNamePrefix, sharedKeyNameInfix, spireKeyID)
+}
+
+func isSharedKeyName(keyName string) bool {
+	return strings.HasPrefix(keyName, keyNamePrefix+"-"+sharedKeyNameInfix+"-")
 }
 
 func getOrCreateServerID(idPath string) (string, error) {

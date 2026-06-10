@@ -17,10 +17,11 @@ import (
 )
 
 type keyFetcher struct {
-	log         hclog.Logger
-	kmsClient   kmsClient
-	serverID    string
-	trustDomain string
+	log           hclog.Logger
+	kmsClient     kmsClient
+	serverID      string
+	trustDomain   string
+	sharedJWTKeys bool
 }
 
 func (kf *keyFetcher) fetchKeyEntries(ctx context.Context) ([]*keyEntry, error) {
@@ -135,6 +136,12 @@ func (kf *keyFetcher) fetchKeyEntryDetails(ctx context.Context, alias types.Alia
 
 func (kf *keyFetcher) spireKeyIDFromAlias(aliasName string) (string, bool) {
 	trustDomain := sanitizeTrustDomain(kf.trustDomain)
+	if kf.sharedJWTKeys {
+		sharedPrefix := path.Join(aliasPrefix, trustDomain, sharedAliasSegment) + "/"
+		if trimmed, ok := strings.CutPrefix(aliasName, sharedPrefix); ok {
+			return decodeKeyID(trimmed), true
+		}
+	}
 	prefix := path.Join(aliasPrefix, trustDomain, kf.serverID) + "/"
 	trimmed := strings.TrimPrefix(aliasName, prefix)
 	if trimmed == aliasName {

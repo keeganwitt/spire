@@ -257,6 +257,18 @@ func TestWithMetrics(t *testing.T) {
 			key:        "datastore.ca_journal.list",
 			methodName: "ListCAJournalsForTesting",
 		},
+		{
+			key:        "datastore.jwt_signing_authority.acquire",
+			methodName: "AcquireJWTSigningAuthority",
+		},
+		{
+			key:        "datastore.jwt_signing_authority.set",
+			methodName: "SaveJWTSigningAuthority",
+		},
+		{
+			key:        "datastore.jwt_signing_authority.fetch",
+			methodName: "FetchJWTSigningAuthority",
+		},
 	} {
 		methodType, ok := wt.MethodByName(tt.methodName)
 		require.True(t, ok, "method %q does not exist on DataStore interface", tt.methodName)
@@ -550,6 +562,18 @@ func (ds *fakeDataStore) FetchCAJournal(context.Context, string) (*datastore.CAJ
 
 func (ds *fakeDataStore) ListCAJournalsForTesting(context.Context) ([]*datastore.CAJournal, error) {
 	return []*datastore.CAJournal{}, ds.err
+}
+
+func (ds *fakeDataStore) AcquireJWTSigningAuthority(context.Context, string, string, time.Time, time.Duration) (*datastore.JWTSigningAuthorityLease, bool, error) {
+	return &datastore.JWTSigningAuthorityLease{}, false, ds.err
+}
+
+func (ds *fakeDataStore) SaveJWTSigningAuthority(context.Context, *datastore.JWTSigningAuthorityLease) error {
+	return ds.err
+}
+
+func (ds *fakeDataStore) FetchJWTSigningAuthority(context.Context, string) (*datastore.JWTSigningAuthorityLease, error) {
+	return &datastore.JWTSigningAuthorityLease{}, ds.err
 }
 
 func (ds *fakeDataStore) PruneCAJournals(context.Context, int64) error {

@@ -80,6 +80,7 @@ type serverConfig struct {
 	Experimental                 experimentalConfig `hcl:"experimental"`
 	Federation                   *federationConfig  `hcl:"federation"`
 	DisableJWTSVIDs              bool               `hcl:"disable_jwt_svids"`
+	JWTKeySharing                bool               `hcl:"jwt_key_sharing"`
 	JWTIssuer                    string             `hcl:"jwt_issuer"`
 	JWTKeyType                   string             `hcl:"jwt_key_type"`
 	LogFile                      string             `hcl:"log_file"`
@@ -716,6 +717,7 @@ func NewServerConfig(c *Config, logOptions []log.Option, allowUnknownConfig bool
 		sc.Log.Info("JWT-SVID profile is disabled")
 	}
 	sc.DisableJWTSVIDs = c.Server.DisableJWTSVIDs
+	sc.JWTKeySharing = c.Server.JWTKeySharing
 
 	sc.DisableWITSVIDs = true
 	if fflag.IsSet(fflag.FlagWITSVID) {

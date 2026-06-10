@@ -107,6 +107,12 @@ func (my mysqlDB) isConstraintViolation(err error) bool {
 	return ok && e.Number == 1062 // ER_DUP_ENTRY
 }
 
+func (my mysqlDB) isDeadlock(err error) bool {
+	var e *mysql.MySQLError
+	ok := errors.As(err, &e)
+	return ok && e.Number == 1213 // ER_LOCK_DEADLOCK
+}
+
 // configureConnection modifies the connection string to support features that
 // normally require code changes, like custom Root CAs or client certificates
 func configureConnection(cfg *configuration, isReadOnly bool) (*mysql.Config, error) {

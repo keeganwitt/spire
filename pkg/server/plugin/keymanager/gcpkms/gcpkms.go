@@ -28,6 +28,7 @@ import (
 	"github.com/spiffe/spire/pkg/common/catalog"
 	"github.com/spiffe/spire/pkg/common/diskutil"
 	"github.com/spiffe/spire/pkg/common/pluginconf"
+	"github.com/spiffe/spire/pkg/server/plugin/keymanager"
 	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"google.golang.org/grpc/codes"
@@ -49,11 +50,12 @@ const (
 	keepActiveCryptoKeysFrequency = time.Hour * 6
 	maxStaleDuration              = time.Hour * 24 * 14 // Two weeks.
 
-	cryptoKeyNamePrefix = "spire-key"
-	labelNameServerID   = "spire-server-id"
-	labelNameLastUpdate = "spire-last-update"
-	labelNameServerTD   = "spire-server-td"
-	labelNameActive     = "spire-active"
+	cryptoKeyNamePrefix      = "spire-key"
+	cryptoKeyNameSharedInfix = "shared"
+	labelNameServerID        = "spire-server-id"
+	labelNameLastUpdate      = "spire-last-update"
+	labelNameServerTD        = "spire-server-td"
+	labelNameActive          = "spire-active"
 
 	getPublicKeyMaxAttempts = 10
 )
@@ -89,9 +91,10 @@ type pluginHooks struct {
 }
 
 type pluginData struct {
-	customPolicy *iam.Policy3
-	serverID     string
-	tdHash       string
+	customPolicy  *iam.Policy3
+	serverID      string
+	tdHash        string
+	sharedJWTKeys bool
 }
 
 // Plugin is the main representation of this keymanager plugin.
@@ -136,6 +139,9 @@ type Config struct {
 	// API. If not specified, the value of the GOOGLE_APPLICATION_CREDENTIALS
 	// environment variable is used.
 	ServiceAccountFile string `hcl:"service_account_file" json:"service_account_file"`
+
+	// SharedJWTKeys enables sharing JWT signing keys across servers in the trust domain.
+	SharedJWTKeys bool `hcl:"shared_jwt_keys" json:"shared_jwt_keys"`
 }
 
 func buildConfig(coreConfig catalog.CoreConfig, hclText string, status *pluginconf.Status) *Config {
@@ -225,9 +231,10 @@ func (p *Plugin) Configure(ctx context.Context, req *configv1.ConfigureRequest) 
 	tdHashString := hex.EncodeToString(tdHashBytes[:])
 
 	p.setPluginData(&pluginData{
-		customPolicy: customPolicy,
-		serverID:     serverID,
-		tdHash:       tdHashString,
+		customPolicy:  customPolicy,
+		serverID:      serverID,
+		tdHash:        tdHashString,
+		sharedJWTKeys: newConfig.SharedJWTKeys,
 	})
 
 	var opts []option.ClientOption
@@ -304,19 +311,71 @@ func (p *Plugin) GenerateKey(ctx context.Context, req *keymanagerv1.GenerateKeyR
 }
 
 // GetPublicKey returns the public key for a given key
-func (p *Plugin) GetPublicKey(_ context.Context, req *keymanagerv1.GetPublicKeyRequest) (*keymanagerv1.GetPublicKeyResponse, error) {
+func (p *Plugin) GetPublicKey(ctx context.Context, req *keymanagerv1.GetPublicKeyRequest) (*keymanagerv1.GetPublicKeyResponse, error) {
 	if req.KeyId == "" {
 		return nil, status.Error(codes.InvalidArgument, "key id is required")
 	}
 
 	entry, ok := p.getKeyEntry(req.KeyId)
 	if !ok {
-		return nil, status.Errorf(codes.NotFound, "key %q not found", req.KeyId)
+		var err error
+		entry, ok, err = p.fetchSharedKeyOnMiss(ctx, req.KeyId)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, status.Errorf(codes.NotFound, "key %q not found", req.KeyId)
+		}
 	}
 
 	return &keymanagerv1.GetPublicKeyResponse{
 		PublicKey: entry.publicKey,
 	}, nil
+}
+
+func (p *Plugin) fetchSharedKeyOnMiss(ctx context.Context, spireKeyID string) (keyEntry, bool, error) {
+	pd, err := p.getPluginData()
+	if err != nil {
+		return keyEntry{}, false, err
+	}
+	if !pd.sharedJWTKeys || !keymanager.IsSharedKeyID(spireKeyID) {
+		return keyEntry{}, false, nil
+	}
+
+	config, err := p.getConfig()
+	if err != nil {
+		return keyEntry{}, false, err
+	}
+
+	kf := &keyFetcher{kmsClient: p.kmsClient, log: p.log}
+	it := p.kmsClient.ListCryptoKeys(ctx, &kmspb.ListCryptoKeysRequest{
+		Parent: config.KeyRing,
+		Filter: fmt.Sprintf("labels.%s = %s AND labels.%s = true", labelNameServerTD, pd.tdHash, labelNameActive),
+	})
+	for {
+		cryptoKey, err := it.Next()
+		if errors.Is(err, iterator.Done) {
+			break
+		}
+		if err != nil {
+			return keyEntry{}, false, nil //nolint:nilerr // list failure is treated as not found so the caller retries
+		}
+		if !isSharedCryptoKeyName(cryptoKey.Name) {
+			continue
+		}
+		keyID, ok := getSPIREKeyIDFromCryptoKeyName(cryptoKey.Name)
+		if !ok || keyID != spireKeyID {
+			continue
+		}
+		entries, err := kf.getKeyEntriesFromCryptoKey(ctx, cryptoKey, spireKeyID)
+		if err != nil || len(entries) == 0 {
+			return keyEntry{}, false, nil //nolint:nilerr // fetch failure is treated as not found so the caller retries
+		}
+		entry := *entries[0]
+		p.setKeyEntry(spireKeyID, entry)
+		return entry, true, nil
+	}
+	return keyEntry{}, false, nil
 }
 
 // GetPublicKeys returns the publicKey for all the keys.
@@ -570,6 +629,11 @@ func (p *Plugin) disposeCryptoKeys(ctx context.Context) error {
 		if err != nil {
 			p.log.Error("Failure listing CryptoKeys to dispose", reasonTag, err)
 			return err
+		}
+
+		// Never dispose shared JWT keys; they are managed by the JWT authority writer.
+		if isSharedCryptoKeyName(cryptoKey.Name) {
+			continue
 		}
 
 		itCryptoKeyVersions := p.kmsClient.ListCryptoKeyVersions(ctx, &kmspb.ListCryptoKeyVersionsRequest{
@@ -1035,7 +1099,22 @@ func (p *Plugin) generateCryptoKeyID(spireKeyID string) (cryptoKeyID string, err
 	if err != nil {
 		return "", err
 	}
+	if pd.sharedJWTKeys && keymanager.IsSharedKeyID(spireKeyID) {
+		return sharedCryptoKeyID(spireKeyID), nil
+	}
 	return fmt.Sprintf("%s-%s-%s", cryptoKeyNamePrefix, pd.serverID, spireKeyID), nil
+}
+
+func sharedCryptoKeyID(spireKeyID string) string {
+	return fmt.Sprintf("%s-%s-%s", cryptoKeyNamePrefix, cryptoKeyNameSharedInfix, spireKeyID)
+}
+
+func isSharedCryptoKeyName(cryptoKeyName string) bool {
+	name := cryptoKeyName
+	if i := strings.LastIndex(cryptoKeyName, "/"); i >= 0 {
+		name = cryptoKeyName[i+1:]
+	}
+	return strings.HasPrefix(name, cryptoKeyNamePrefix+"-"+cryptoKeyNameSharedInfix+"-")
 }
 
 // crc32Checksum returns the CRC-32 checksum of data using the polynomial
